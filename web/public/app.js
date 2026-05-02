@@ -128,7 +128,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502q";
+const APP_VERSION = "heart-market-20260502r";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -1304,7 +1304,7 @@ async function preloadCriticalEntryAssets(urls = []) {
   if (!unique.length) return;
   setEntryStatus("浏览器正在预载首屏地图…", 46, `0/${unique.length}`);
   await warmImages(unique, (done, total) => {
-    setEntryStatus("浏览器正在预载首屏地图…", progressBetween(46, 72, done, total), `${done}/${total}`);
+    setEntryStatus("浏览器正在预载首屏地图…", progressBetween(46, 58, done, total), `${done}/${total}`);
   });
 }
 
@@ -1312,9 +1312,9 @@ async function preloadNpcEntryFrames(render) {
   if (!CLOUD_FAST_BOOT) return;
   const unique = [...new Set(npcSpriteFirstFrameUrls(render).filter(Boolean))];
   if (!unique.length) return;
-  setEntryStatus("\u6d4f\u89c8\u5668\u6b63\u5728\u9884\u8f7dNPC\u9996\u5e27\u2026", 73, `0/${unique.length}`);
+  setEntryStatus("\u6d4f\u89c8\u5668\u6b63\u5728\u9884\u8f7dNPC\u9996\u5e27\u2026", 59, `0/${unique.length}`);
   await warmImages(unique, (done, total) => {
-    setEntryStatus("\u6d4f\u89c8\u5668\u6b63\u5728\u9884\u8f7dNPC\u9996\u5e27\u2026", progressBetween(73, 88, done, total), `${done}/${total}`);
+    setEntryStatus("\u6d4f\u89c8\u5668\u6b63\u5728\u9884\u8f7dNPC\u9996\u5e27\u2026", progressBetween(59, 70, done, total), `${done}/${total}`);
   });
 }
 
@@ -6187,7 +6187,7 @@ function draw(now = performance.now()) {
   requestAnimationFrame(draw);
 }
 
-async function loadRenderedScene() {
+async function loadRenderedScene(options = {}) {
   if (state.render?.scene?.tiles?.length && state.layers?.ready) {
     hydrateCollisionGrid(state.render);
     return state.render;
@@ -6198,14 +6198,17 @@ async function loadRenderedScene() {
   const spriteUrlsToLoad = npcSpriteUrls(data);
 
   if (CLOUD_FAST_BOOT) {
-    setEntryStatus(TEXT.loadingScene, 12, "首屏地图");
+    const progressStart = Number(options.progressStart ?? 12);
+    const progressEnd = Number(options.progressEnd ?? 76);
+    const progressLabel = options.label || "首屏地图";
+    setEntryStatus(TEXT.loadingScene, progressStart, progressLabel);
     ensureCanvasSize();
     state.layers = buildSceneLayers(data.scene);
     invalidatePanCache();
     const initialJobs = initialSceneChunkJobs(state.layers);
     await composeChunkJobs(initialJobs, (done, total) => {
-      setEntryStatus(TEXT.composingMapProgress(done, total), progressBetween(12, 76, done, total), "首屏地图");
-    });
+      setEntryStatus(TEXT.composingMapProgress(done, total), progressBetween(progressStart, progressEnd, done, total), progressLabel);
+    }, { preloadAll: Boolean(options.preloadAll) });
     await prepareGpuLayers(state.layers);
     state.layers.ready = true;
     invalidatePanCache();
@@ -6315,6 +6318,7 @@ async function preloadRuntime(roleModels) {
     await fetchRenderedSceneData();
     await preloadCriticalEntryAssets(preload.criticalUrls || []);
     await preloadNpcEntryFrames(state.render);
+    await loadRenderedScene({ progressStart: 71, progressEnd: 96, label: "首屏场景", preloadAll: true });
     state.runtimeReady = true;
     const ready = await fetchJson("/generated/runtime-ready.json").catch(() => null);
     const roleCount = ready?.roles?.length || roleModels.length;
