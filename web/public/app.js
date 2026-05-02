@@ -88,6 +88,8 @@ const ENTRY_NPC_VISIBLE_FRAMES = 8;
 const ENTRY_NPC_VISIBLE_LIMIT = 48;
 const ENTRY_NPC_PRELOAD_PAD = 560;
 const NPC_BACKGROUND_PRELOAD_BATCH = 96;
+const CORE_SCENE_WARMUP_KEYS = ["comfort", "memory", "fortune", "clarity", "stall"];
+const CORE_SCENE_WARMUP_PAD = 1150;
 const FULL_LAYER_MAX_PIXELS = 90000000;
 const USE_FULL_LAYER = false;
 const MAX_DEVICE_PIXEL_RATIO = 1;
@@ -125,7 +127,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502o";
+const APP_VERSION = "heart-market-20260502p";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -569,6 +571,7 @@ const state = {
   layers: null,
   sceneLoadPromise: null,
   sceneWarmup: { running: false, complete: false, visibleRunning: false },
+  sceneFocusWarmup: { running: false, warmed: new Set() },
   npcWarmup: { running: false, complete: false, visibleReady: false },
   role: null,
   roleSprites: null,
@@ -1594,6 +1597,49 @@ async function warmVisibleSceneNow() {
   } finally {
     state.sceneWarmup.visibleRunning = false;
   }
+}
+
+function rectAroundWorldPoint(x, y, pad = CORE_SCENE_WARMUP_PAD) {
+  return {
+    left: x - pad,
+    top: y - pad,
+    right: x + pad,
+    bottom: y + pad,
+  };
+}
+
+async function warmSceneAroundNpc(npc, options = {}) {
+  if (!CLOUD_FAST_BOOT || !npc) return;
+  const p = npcWorld(npc);
+  const pad = Number(options.pad || CORE_SCENE_WARMUP_PAD);
+  const key = `${npc.id}:${Math.round(pad)}`;
+  if (!options.force && state.sceneFocusWarmup.warmed.has(key)) return;
+  if (!state.layers?.ready) await startSceneLoad();
+  if (!state.layers?.ready) return;
+  const jobs = chunkJobsInRect(state.layers, rectAroundWorldPoint(p.x, p.y, pad));
+  if (!jobs.length) return;
+  await composeChunkJobs(jobs);
+  state.sceneFocusWarmup.warmed.add(key);
+}
+
+function schedulePrioritySceneWarmup(keys = CORE_SCENE_WARMUP_KEYS) {
+  if (!CLOUD_FAST_BOOT || state.sceneFocusWarmup.running || !state.market?.coreNpcByKey?.size) return;
+  state.sceneFocusWarmup.running = true;
+  window.setTimeout(async () => {
+    try {
+      await startSceneLoad();
+      const uniqueKeys = [...new Set(keys)];
+      for (const key of uniqueKeys) {
+        const npc = state.market.coreNpcByKey.get(key);
+        if (npc) await warmSceneAroundNpc(npc);
+        await sleep(90);
+      }
+    } catch {
+      // Target-area warmup is best-effort; explicit navigation retries before moving the camera.
+    } finally {
+      state.sceneFocusWarmup.running = false;
+    }
+  }, 700);
 }
 
 function markResizeDirty() {
@@ -2678,6 +2724,11 @@ function resetMarketSession() {
   state.tutorial.dismissed = false;
   state.tutorial.stage = "entry";
   state.guidance = { npcId: "", label: "", startedAt: 0 };
+  state.sceneFocusWarmup.running = false;
+  state.sceneFocusWarmup.warmed.clear();
+  state.npcWarmup.running = false;
+  state.npcWarmup.complete = false;
+  state.npcWarmup.visibleReady = false;
   if (els.newbieGuide) els.newbieGuide.hidden = true;
 }
 
@@ -3750,7 +3801,7 @@ function performFortune(profile, reroll = false, options = {}) {
   else marketPanel(profile.name, `<p>${escapeHtml(profile.line)}</p><div class="market-card"><strong>${escapeHtml(fortune)}</strong><small>签不替你走路，只替你点灯。</small></div><button data-market-action="fortune-reroll" data-npc="${escapeHtml(profile.npcId)}" type="button">再测一签 · 3 心币</button>`);
 }
 
-function focusCoreNpc(key) {
+async function focusCoreNpc(key) {
   const npc = state.market.coreNpcByKey.get(key);
   if (!npc) return;
   state.selectedNpc = npc;
@@ -3766,6 +3817,10 @@ function focusCoreNpc(key) {
   checkMarketAchievements();
   const p = npcWorld(npc);
   const target = nearestWalkablePoint({ x: p.x, y: p.y + 30 }, state.role?.position || p) || { x: p.x, y: p.y + 30 };
+  if (CLOUD_FAST_BOOT) {
+    setStatus(`\u6b63\u5728\u94fa\u5f00${displayNpcName(npc)}\u9644\u8fd1\u7684\u957f\u5b89\u8857\u666f...`);
+    await warmSceneAroundNpc(npc, { force: true });
+  }
   if (state.view.width && state.view.height) {
     setCameraPosition(p.x - state.view.width / state.zoom / 2, p.y - state.view.height / state.zoom / 2, { manualHold: CAMERA_MANUAL_HOLD_MS });
   }
@@ -3856,6 +3911,10 @@ function performEntranceClaim(key) {
   );
   renderMarketHud();
   showNewbieGuide("trade", true);
+  if (CLOUD_FAST_BOOT) {
+    warmSceneAroundNpc(state.market.coreNpcByKey.get(choice.recommend)).catch(() => {});
+    warmSceneAroundNpc(state.market.coreNpcByKey.get("stall")).catch(() => {});
+  }
 }
 
 function renderGuidePanel() {
@@ -6312,7 +6371,8 @@ async function enterGame(payload) {
     window.setTimeout(tryAutoplayMusic, 120);
     setStatus(TEXT.enteredCity(state.role.name));
     scheduleNpcBackgroundWarmup();
-    window.setTimeout(() => startSceneLoad().catch((error) => setStatus(error.message)), 1800);
+    window.setTimeout(() => startSceneLoad().catch((error) => setStatus(error.message)), 450);
+    window.setTimeout(() => schedulePrioritySceneWarmup(), 900);
     return;
   }
 
