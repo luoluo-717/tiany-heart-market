@@ -118,7 +118,9 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502g";
+const APP_VERSION = "heart-market-20260502h";
+const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
+const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
 const DIALOGUE_BGM_URL = `/assets/audio/shizima3-dialogue.mp3?v=${APP_VERSION}`;
 const HOME_MUSIC_VOLUME = 0.055;
@@ -557,6 +559,7 @@ const state = {
   scene: null,
   render: null,
   layers: null,
+  sceneWarmup: { running: false, complete: false },
   role: null,
   roleSprites: null,
   roleSpriteCache: new Map(),
@@ -1349,6 +1352,84 @@ function npcSpriteUrls(render) {
   return urls;
 }
 
+function chunkItemUrls(chunk) {
+  return (chunk?.items || []).map((item) => item.url).filter(Boolean);
+}
+
+function chunkJobsInRect(layers, rect) {
+  if (!layers) return [];
+  const minCol = Math.max(0, Math.floor(rect.left / CHUNK_WIDTH));
+  const maxCol = Math.min(layers.cols - 1, Math.floor(rect.right / CHUNK_WIDTH));
+  const minRow = Math.max(0, Math.floor(rect.top / CHUNK_HEIGHT));
+  const maxRow = Math.min(layers.rows - 1, Math.floor(rect.bottom / CHUNK_HEIGHT));
+  const jobs = [];
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let col = minCol; col <= maxCol; col += 1) {
+      const index = row * layers.cols + col;
+      if (layers.base[index]) jobs.push({ chunk: layers.base[index], type: "base" });
+      if (layers.masks[index]?.items?.length) jobs.push({ chunk: layers.masks[index], type: "mask" });
+    }
+  }
+  return jobs;
+}
+
+function initialSceneChunkJobs(layers) {
+  const viewWidth = state.view.width || 1280;
+  const viewHeight = state.view.height || 720;
+  const pos = state.role?.position || { x: 5000, y: 3400 };
+  const left = clampValue(pos.x - viewWidth / state.zoom / 2, 0, Math.max(0, layers.width - viewWidth / state.zoom));
+  const top = clampValue(pos.y - viewHeight / state.zoom / 2, 0, Math.max(0, layers.height - viewHeight / state.zoom));
+  const pad = CHUNK_WIDTH * 0.75;
+  return chunkJobsInRect(layers, {
+    left: left - pad,
+    top: top - pad,
+    right: left + viewWidth / state.zoom + pad,
+    bottom: top + viewHeight / state.zoom + pad,
+  });
+}
+
+async function composeChunkJobs(jobs, onProgress) {
+  const uniqueJobs = [];
+  const seen = new Set();
+  for (const job of jobs) {
+    if (!job.chunk || job.chunk.canvas) continue;
+    const key = `${job.type}:${job.chunk.x}:${job.chunk.y}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueJobs.push(job);
+  }
+  for (let index = 0; index < uniqueJobs.length; index += 1) {
+    const job = uniqueJobs[index];
+    const urls = chunkItemUrls(job.chunk);
+    if (urls.length) await warmImages(urls);
+    renderChunk(job.chunk, job.type);
+    releaseImages(urls);
+    if (job.type === "base") await gpuBaseLayer.uploadChunks([job.chunk]);
+    if (job.type === "mask") await gpuMaskLayer.uploadChunks([job.chunk]);
+    if (onProgress) onProgress(index + 1, uniqueJobs.length);
+    if ((index + 1) % 2 === 0) await nextIdleFrame();
+  }
+}
+
+function scheduleSceneBackgroundWarmup(layers) {
+  if (!CLOUD_FAST_BOOT || state.sceneWarmup.running || state.sceneWarmup.complete || !layers) return;
+  state.sceneWarmup.running = true;
+  window.setTimeout(async () => {
+    try {
+      const jobs = [
+        ...layers.base.map((chunk) => ({ chunk, type: "base" })),
+        ...layers.masks.filter((chunk) => chunk.items.length).map((chunk) => ({ chunk, type: "mask" })),
+      ];
+      await composeChunkJobs(jobs);
+      state.sceneWarmup.complete = true;
+    } catch {
+      // Background warmup is optional; visible chunks continue to load on demand.
+    } finally {
+      state.sceneWarmup.running = false;
+    }
+  }, 500);
+}
+
 function markResizeDirty() {
   state.resizeDirty = true;
   invalidatePanCache();
@@ -1848,6 +1929,7 @@ function npcHasReadySprite(npc) {
   const sprite = state.render?.npcSprites?.[npc.id];
   const frames = sprite?.manifest?.frames || [];
   if (!frames.length) return false;
+  if (CLOUD_FAST_BOOT) return true;
   return frames.some((frame) => {
     const record = state.images.get(frame.url);
     return record?.ready && !record.error;
@@ -5840,6 +5922,28 @@ async function loadRenderedScene() {
   const staticUrls = sceneStaticUrls(data);
   const spriteUrlsToLoad = npcSpriteUrls(data);
 
+  if (CLOUD_FAST_BOOT) {
+    setEntryStatus(TEXT.loadingScene, 12, "首屏地图");
+    ensureCanvasSize();
+    state.layers = buildSceneLayers(data.scene);
+    invalidatePanCache();
+    const initialJobs = initialSceneChunkJobs(state.layers);
+    await composeChunkJobs(initialJobs, (done, total) => {
+      setEntryStatus(TEXT.composingMapProgress(done, total), progressBetween(12, 76, done, total), "首屏地图");
+    });
+    await prepareGpuLayers(state.layers);
+    state.layers.ready = true;
+    invalidatePanCache();
+    scheduleSceneBackgroundWarmup(state.layers);
+
+    filterUnavailableNpcs();
+    if (state.scene && data.scene?.width && data.scene?.height) {
+      applyRenderBounds();
+      centerCamera();
+    }
+    return data;
+  }
+
   setEntryStatus(TEXT.loadingScene, 8, TEXT.loadingSceneDetail(0, staticUrls.length + spriteUrlsToLoad.length));
   await warmImages([...staticUrls, ...spriteUrlsToLoad], (done, total) => {
     setEntryStatus(TEXT.loadingSceneProgress(done, total), progressBetween(8, 58, done, total), TEXT.loadingSceneDetail(done, total));
@@ -5870,7 +5974,13 @@ async function loadRoleSprite(model) {
     return state.roleSprites;
   }
   const data = await fetchJson(`/api/render/model?model=${encodeURIComponent(model)}`);
-  await warmImages([...spriteUrls(data.sprites?.stand), ...spriteUrls(data.sprites?.walk)]);
+  const urls = [...spriteUrls(data.sprites?.stand), ...spriteUrls(data.sprites?.walk)];
+  if (CLOUD_FAST_BOOT) {
+    await warmImages(urls.slice(0, 18));
+    window.setTimeout(() => warmImages(urls).catch(() => {}), 800);
+  } else {
+    await warmImages(urls);
+  }
   state.roleSpriteCache.set(data.model, data);
   state.roleSprites = data;
   return data;
@@ -5899,6 +6009,18 @@ async function preloadRuntime(roleModels) {
   els.guestButton.disabled = true;
 
   await loadRenderedScene();
+
+  if (CLOUD_FAST_BOOT) {
+    state.runtimeReady = true;
+    const ready = await fetchJson("/generated/runtime-ready.json").catch(() => null);
+    const roleCount = ready?.roles?.length || roleModels.length;
+    setEntryStatus(TEXT.runtimeReady(state.scene.npcs.length, roleCount), 100, TEXT.runtimeReadyDetail);
+    preloadMusicAsset();
+    els.loginOpenButton.disabled = false;
+    els.accountButton.disabled = false;
+    els.guestButton.disabled = false;
+    return;
+  }
 
   setEntryStatus(TEXT.loadingRoles, 76, TEXT.loadingRolesDetail(0, roleModels.length));
   await runPool(
