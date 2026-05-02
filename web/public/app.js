@@ -118,7 +118,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502j";
+const APP_VERSION = "heart-market-20260502k";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -146,6 +146,7 @@ const TEXT = {
   enteredCity: (name) => `${name} \u5df2\u8fdb\u5165${CITY_NAME}`,
   creatingGuest: "\u6b63\u5728\u8fdb\u5165\u8bbf\u5ba2\u6a21\u5f0f...",
   accountEnter: "\u6b63\u5728\u786e\u8ba4\u8eab\u4efd...",
+  loadingVisibleScene: "\u6b63\u5728\u94fa\u5f00\u957f\u5b89\u5e02\u96c6\u2026",
   bootstrap: () => "\u5fc3\u5e02\u5f00\u5e02\u4e2d\u2026",
 };
 const DIRECTION_GROUPS = [7, 0, 4, 1, 5, 2, 6, 3];
@@ -6050,7 +6051,6 @@ async function preloadRuntime(roleModels) {
     els.loginOpenButton.disabled = false;
     els.accountButton.disabled = false;
     els.guestButton.disabled = false;
-    window.setTimeout(() => startSceneLoad().catch((error) => setStatus(error.message)), 250);
     return;
   }
 
@@ -6097,18 +6097,20 @@ async function enterGame(payload) {
   setStatus(TEXT.enteringCity);
 
   if (CLOUD_FAST_BOOT) {
+    const scenePromise = startSceneLoad();
     renderMarketHud();
     renderWelcomeMarketPanel();
     showNewbieGuide("entry", true);
     window.setTimeout(tryAutoplayMusic, 120);
-    setStatus(TEXT.enteredCity(state.role.name));
-    Promise.all([startSceneLoad(), loadRoleSprite(state.role.model)])
+    setStatus(TEXT.loadingVisibleScene);
+    Promise.all([scenePromise, loadRoleSprite(state.role.model)])
       .then(() => {
         applyRenderBounds();
         filterUnavailableNpcs();
         setupMarketWorld();
         resetMotionState(true);
         renderMarketHud();
+        setStatus(TEXT.enteredCity(state.role.name));
       })
       .catch((error) => setStatus(error.message));
     return;
