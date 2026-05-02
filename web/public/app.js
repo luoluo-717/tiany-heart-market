@@ -118,7 +118,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502h";
+const APP_VERSION = "heart-market-20260502i";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -559,6 +559,7 @@ const state = {
   scene: null,
   render: null,
   layers: null,
+  sceneLoadPromise: null,
   sceneWarmup: { running: false, complete: false },
   role: null,
   roleSprites: null,
@@ -1379,7 +1380,7 @@ function initialSceneChunkJobs(layers) {
   const pos = state.role?.position || { x: 5000, y: 3400 };
   const left = clampValue(pos.x - viewWidth / state.zoom / 2, 0, Math.max(0, layers.width - viewWidth / state.zoom));
   const top = clampValue(pos.y - viewHeight / state.zoom / 2, 0, Math.max(0, layers.height - viewHeight / state.zoom));
-  const pad = CHUNK_WIDTH * 0.75;
+  const pad = 32;
   return chunkJobsInRect(layers, {
     left: left - pad,
     top: top - pad,
@@ -5968,6 +5969,18 @@ async function loadRenderedScene() {
   return data;
 }
 
+function startSceneLoad() {
+  if (state.render?.scene?.tiles?.length && state.layers?.ready) {
+    return Promise.resolve(state.render);
+  }
+  if (!state.sceneLoadPromise) {
+    state.sceneLoadPromise = loadRenderedScene().finally(() => {
+      state.sceneLoadPromise = null;
+    });
+  }
+  return state.sceneLoadPromise;
+}
+
 async function loadRoleSprite(model) {
   if (state.roleSpriteCache.has(model)) {
     state.roleSprites = state.roleSpriteCache.get(model);
@@ -6008,8 +6021,6 @@ async function preloadRuntime(roleModels) {
   els.accountButton.disabled = true;
   els.guestButton.disabled = true;
 
-  await loadRenderedScene();
-
   if (CLOUD_FAST_BOOT) {
     state.runtimeReady = true;
     const ready = await fetchJson("/generated/runtime-ready.json").catch(() => null);
@@ -6019,8 +6030,11 @@ async function preloadRuntime(roleModels) {
     els.loginOpenButton.disabled = false;
     els.accountButton.disabled = false;
     els.guestButton.disabled = false;
+    window.setTimeout(() => startSceneLoad().catch((error) => setStatus(error.message)), 250);
     return;
   }
+
+  await loadRenderedScene();
 
   setEntryStatus(TEXT.loadingRoles, 76, TEXT.loadingRolesDetail(0, roleModels.length));
   await runPool(
@@ -6061,6 +6075,24 @@ async function enterGame(payload) {
   });
   resetMotionState(true);
   setStatus(TEXT.enteringCity);
+
+  if (CLOUD_FAST_BOOT) {
+    renderMarketHud();
+    renderWelcomeMarketPanel();
+    showNewbieGuide("entry", true);
+    window.setTimeout(tryAutoplayMusic, 120);
+    setStatus(TEXT.enteredCity(state.role.name));
+    Promise.all([startSceneLoad(), loadRoleSprite(state.role.model)])
+      .then(() => {
+        applyRenderBounds();
+        filterUnavailableNpcs();
+        setupMarketWorld();
+        resetMotionState(true);
+        renderMarketHud();
+      })
+      .catch((error) => setStatus(error.message));
+    return;
+  }
 
   await Promise.all([
     state.render ? Promise.resolve(state.render) : loadRenderedScene(),
