@@ -46,6 +46,19 @@ const ROLE_MODELS = [
 const decoder = new TextDecoder("gb18030");
 const sessions = new Map();
 const renderJobs = new Map();
+const staticPreload = {
+  enabled: process.env.PRELOAD_STATIC === "1",
+  running: false,
+  ready: process.env.PRELOAD_STATIC !== "1",
+  startedAt: null,
+  completedAt: null,
+  totalFiles: 0,
+  loadedFiles: 0,
+  totalBytes: 0,
+  loadedBytes: 0,
+  criticalUrls: [],
+  error: "",
+};
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -97,8 +110,20 @@ function listFiles(dir) {
   return files;
 }
 
+function listExistingFiles(dirs) {
+  const files = [];
+  for (const dir of dirs) {
+    if (fs.existsSync(dir)) files.push(...listFiles(dir));
+  }
+  return [...new Set(files)];
+}
+
 function toUrlPath(relativePath) {
   return relativePath.split(path.sep).join("/").split("/").map(encodeURIComponent).join("/");
+}
+
+function toPosixPath(value) {
+  return String(value || "").split(path.sep).join("/");
 }
 
 function json(res, status, payload) {
@@ -1169,6 +1194,17 @@ async function precompileRuntimeAssets() {
 }
 
 async function handleApi(req, res, url) {
+  if (url.pathname === "/api/preload/status" && req.method === "GET") {
+    if (staticPreload.enabled && !staticPreload.running && !staticPreload.ready) {
+      preloadStaticResources().catch((error) => {
+        staticPreload.error = error.message;
+        staticPreload.running = false;
+      });
+    }
+    json(res, 200, staticPreloadPayload());
+    return;
+  }
+
   if (url.pathname === "/api/bootstrap" && req.method === "GET") {
     json(res, 200, {
       title: "天元市集",
@@ -1396,6 +1432,90 @@ function isInside(root, target) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+async function warmFile(file) {
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(file, { highWaterMark: 1024 * 1024 });
+    stream.on("data", () => {});
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+}
+
+function criticalSceneUrls() {
+  const manifestFile = path.join(GENERATED_DIR, "scenes", String(CHANGAN_MAP_ID), "manifest.json");
+  const manifest = JSON.parse(readText(manifestFile) || "{}");
+  const tiles = manifest.tiles || [];
+  const masks = manifest.masks || [];
+  const spawn = DEFAULT_SPAWN;
+  const rect = {
+    left: spawn.x - 760,
+    right: spawn.x + 760,
+    top: spawn.y - 560,
+    bottom: spawn.y + 560,
+  };
+  const visible = (item) => !(item.x > rect.right || item.y > rect.bottom || item.x + item.width < rect.left || item.y + item.height < rect.top);
+  return [...tiles.filter(visible), ...masks.filter(visible)].map((item) => item.url).filter(Boolean);
+}
+
+async function preloadStaticResources() {
+  if (!staticPreload.enabled || staticPreload.running || staticPreload.ready) return;
+  staticPreload.running = true;
+  staticPreload.startedAt = new Date().toISOString();
+  staticPreload.error = "";
+  try {
+    staticPreload.criticalUrls = criticalSceneUrls();
+    const files = listExistingFiles([
+      path.join(GENERATED_DIR, "scenes", String(CHANGAN_MAP_ID)),
+      path.join(GENERATED_DIR, "was"),
+      path.join(PUBLIC_DIR, "assets", "audio"),
+      path.join(PUBLIC_DIR, "assets", "home"),
+      path.join(PUBLIC_DIR, "assets", "fonts"),
+    ]);
+    const stats = files.map((file) => {
+      try {
+        return { file, size: fs.statSync(file).size };
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+    staticPreload.totalFiles = stats.length;
+    staticPreload.totalBytes = stats.reduce((sum, item) => sum + item.size, 0);
+    for (const item of stats) {
+      await warmFile(item.file);
+      staticPreload.loadedFiles += 1;
+      staticPreload.loadedBytes += item.size;
+    }
+    staticPreload.ready = true;
+    staticPreload.completedAt = new Date().toISOString();
+  } catch (error) {
+    staticPreload.error = error.message;
+  } finally {
+    staticPreload.running = false;
+  }
+}
+
+function staticPreloadPayload() {
+  const progress = staticPreload.totalBytes
+    ? Math.round((staticPreload.loadedBytes / staticPreload.totalBytes) * 100)
+    : staticPreload.ready
+    ? 100
+    : 0;
+  return {
+    enabled: staticPreload.enabled,
+    ready: staticPreload.ready,
+    running: staticPreload.running,
+    progress,
+    totalFiles: staticPreload.totalFiles,
+    loadedFiles: staticPreload.loadedFiles,
+    totalBytes: staticPreload.totalBytes,
+    loadedBytes: staticPreload.loadedBytes,
+    criticalUrls: staticPreload.criticalUrls,
+    startedAt: staticPreload.startedAt,
+    completedAt: staticPreload.completedAt,
+    error: staticPreload.error,
+  };
+}
+
 async function serveFile(req, res, root, relativePath, cacheControl = "no-cache") {
   const target = path.normalize(path.join(root, relativePath));
   if (!isInside(root, target)) {
@@ -1430,7 +1550,14 @@ async function serveStatic(req, res, url) {
     return;
   }
   const relative = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
-  await serveFile(req, res, PUBLIC_DIR, relative);
+  const publicRelative = toPosixPath(relative);
+  const immutable =
+    publicRelative.startsWith("generated/") ||
+    publicRelative.startsWith("assets/audio/") ||
+    publicRelative.startsWith("assets/home/") ||
+    publicRelative.startsWith("assets/fonts/");
+  const cacheControl = immutable ? "public, max-age=31536000, immutable" : "no-cache";
+  await serveFile(req, res, PUBLIC_DIR, relative, cacheControl);
 }
 
 function createServer() {
@@ -1476,6 +1603,10 @@ async function start() {
   }
   if (process.argv.includes("--precompile-only")) return;
   listen(Number(process.env.PORT || 8080));
+  preloadStaticResources().catch((error) => {
+    staticPreload.error = error.message;
+    staticPreload.running = false;
+  });
 }
 
 start().catch((error) => {

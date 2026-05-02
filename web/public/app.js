@@ -118,7 +118,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502l";
+const APP_VERSION = "heart-market-20260502m";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -1263,6 +1263,37 @@ async function fetchJson(url, options = {}) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.message || "request failed");
   return data;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForServerStaticPreload() {
+  if (!CLOUD_FAST_BOOT) return { ready: true, criticalUrls: [] };
+  let latest = { ready: false, criticalUrls: [] };
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    latest = await fetchJson("/api/preload/status").catch(() => latest);
+    if (!latest.enabled || latest.ready) {
+      const progress = latest.ready ? 45 : 18;
+      setEntryStatus(latest.ready ? "服务器长安资源已预热" : "服务器静态资源可用", progress, "");
+      return latest;
+    }
+    const detail = latest.totalFiles ? `${latest.loadedFiles}/${latest.totalFiles}` : "";
+    setEntryStatus("服务器正在预热长安静态资源…", progressBetween(4, 45, latest.progress || 0, 100), detail);
+    await sleep(850);
+  }
+  return latest;
+}
+
+async function preloadCriticalEntryAssets(urls = []) {
+  if (!CLOUD_FAST_BOOT) return;
+  const unique = [...new Set(urls.filter(Boolean))];
+  if (!unique.length) return;
+  setEntryStatus("浏览器正在预载首屏地图…", 46, `0/${unique.length}`);
+  await warmImages(unique, (done, total) => {
+    setEntryStatus("浏览器正在预载首屏地图…", progressBetween(46, 72, done, total), `${done}/${total}`);
+  });
 }
 
 function imageRecord(url) {
@@ -6077,6 +6108,10 @@ async function preloadRuntime(roleModels) {
   els.guestButton.disabled = true;
 
   if (CLOUD_FAST_BOOT) {
+    const preload = await waitForServerStaticPreload();
+    await preloadCriticalEntryAssets(preload.criticalUrls || []);
+    setEntryStatus("正在铺开长安市集首屏…", 74, "");
+    await startSceneLoad();
     state.runtimeReady = true;
     const ready = await fetchJson("/generated/runtime-ready.json").catch(() => null);
     const roleCount = ready?.roles?.length || roleModels.length;
