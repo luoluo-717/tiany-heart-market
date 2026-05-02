@@ -1,0 +1,15 @@
+{
+  "name": "tiany-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Deployable browser web game framework for the Tiany game source.",
+  "scripts": {
+    "start": "node server.js",
+    "start:fast": "set PRECOMPILE=0&& node server.js",
+    "precompile": "node server.js --precompile-only",
+    "check": "node --check server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

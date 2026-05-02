@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: tiany-heart-market
+    env: node
+    rootDir: web
+    plan: starter
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PRECOMPILE
+        value: "0"
+      - key: STATIC_RUNTIME
+        value: "1"

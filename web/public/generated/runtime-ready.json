@@ -1,0 +1,97 @@
+{
+  "ok": true,
+  "generatedAt": "2026-05-01T15:24:05.076Z",
+  "mapId": 1001,
+  "scene": {
+    "tiles": 840,
+    "masks": 818,
+    "npcSpriteFiles": 47
+  },
+  "roles": [
+    {
+      "model": "剑侠客",
+      "standFrames": 80,
+      "walkFrames": 64
+    },
+    {
+      "model": "逍遥生",
+      "standFrames": 80,
+      "walkFrames": 64
+    },
+    {
+      "model": "飞燕女",
+      "standFrames": 64,
+      "walkFrames": 64
+    },
+    {
+      "model": "英女侠",
+      "standFrames": 96,
+      "walkFrames": 64
+    },
+    {
+      "model": "龙太子",
+      "standFrames": 64,
+      "walkFrames": 64
+    },
+    {
+      "model": "巨魔王",
+      "standFrames": 80,
+      "walkFrames": 64
+    },
+    {
+      "model": "虎头怪",
+      "standFrames": 80,
+      "walkFrames": 64
+    },
+    {
+      "model": "狐美人",
+      "standFrames": 80,
+      "walkFrames": 64
+    },
+    {
+      "model": "骨精灵",
+      "standFrames": 64,
+      "walkFrames": 64
+    },
+    {
+      "model": "神天兵",
+      "standFrames": 64,
+      "walkFrames": 64
+    },
+    {
+      "model": "舞天姬",
+      "standFrames": 80,
+      "walkFrames": 64
+    },
+    {
+      "model": "玄彩娥",
+      "standFrames": 64,
+      "walkFrames": 64
+    },
+    {
+      "model": "偃无师",
+      "standFrames": 96,
+      "walkFrames": 64
+    },
+    {
+      "model": "巫蛮儿",
+      "standFrames": 96,
+      "walkFrames": 64
+    },
+    {
+      "model": "羽灵神",
+      "standFrames": 96,
+      "walkFrames": 64
+    },
+    {
+      "model": "杀破狼",
+      "standFrames": 96,
+      "walkFrames": 64
+    },
+    {
+      "model": "桃夭夭",
+      "standFrames": 96,
+      "walkFrames": 64
+    }
+  ]
+}

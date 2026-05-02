@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" role="img" aria-label="soft Chang'an market silhouette">
+  <defs>
+    <linearGradient id="wash" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#f6ead4" stop-opacity="0"/>
+      <stop offset="0.42" stop-color="#d6b98a" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#8a6542" stop-opacity=".16"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#6e5138" stop-opacity=".34"/>
+      <stop offset="1" stop-color="#4e3827" stop-opacity=".52"/>
+    </linearGradient>
+    <filter id="soften" x="-5%" y="-5%" width="110%" height="115%">
+      <feGaussianBlur stdDeviation="1.5"/>
+    </filter>
+    <filter id="paper" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency=".018 .065" numOctaves="3" seed="23"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="table" tableValues="0 .085"/>
+      </feComponentTransfer>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#wash)"/>
+  <rect width="1920" height="1080" filter="url(#paper)" opacity=".55"/>
+
+  <g filter="url(#soften)" opacity=".94">
+    <path d="M0 724 C180 675 352 690 520 655 C690 620 816 646 980 610 C1150 572 1320 628 1498 596 C1658 568 1780 604 1920 572 L1920 1080 L0 1080 Z" fill="#8c6b4c" opacity=".18"/>
+
+    <g fill="url(#ink)">
+      <path d="M120 610 h220 l38 -44 h92 l40 44 h210 l46 -58 h126 l50 58 h236 l44 -50 h110 l48 50 h210 l42 -46 h100 l54 46 h134 v182 H120 Z" opacity=".52"/>
+      <path d="M250 576 l115 -68 118 68 H250 Z"/>
+      <path d="M286 542 h162 v120 H286 Z" opacity=".62"/>
+      <path d="M732 560 l160 -88 164 88 H732 Z" opacity=".92"/>
+      <path d="M786 518 h218 v164 H786 Z" opacity=".64"/>
+      <path d="M1266 566 l128 -76 132 76 H1266 Z" opacity=".86"/>
+      <path d="M1304 526 h184 v136 h-184 Z" opacity=".58"/>
+      <path d="M510 630 h190 v132 H510 Z" opacity=".48"/>
+      <path d="M1106 624 h194 v136 h-194 Z" opacity=".48"/>
+    </g>
+
+    <g stroke="#5e402b" stroke-width="9" stroke-linecap="round" opacity=".46" fill="none">
+      <path d="M218 642 q92 -52 185 0"/>
+      <path d="M707 621 q170 -90 342 0"/>
+      <path d="M1248 629 q142 -72 286 0"/>
+      <path d="M32 764 h1856"/>
+    </g>
+
+    <g opacity=".56" fill="#6f4f35">
+      <path d="M92 700 h178 l-28 70 H120 Z"/>
+      <path d="M95 700 l88 -50 86 50 Z"/>
+      <path d="M1534 698 h210 l-34 76 h-146 Z"/>
+      <path d="M1532 698 l102 -54 110 54 Z"/>
+      <path d="M390 716 h160 l-22 60 H416 Z"/>
+      <path d="M394 716 l76 -42 80 42 Z"/>
+      <path d="M1390 722 h128 l-20 54 h-88 Z"/>
+      <path d="M1390 722 l62 -36 66 36 Z"/>
+    </g>
+
+    <g stroke="#765136" stroke-width="5" stroke-linecap="round" opacity=".46">
+      <path d="M178 646 v142"/>
+      <path d="M1628 640 v152"/>
+      <path d="M470 676 v112"/>
+      <path d="M1452 686 v104"/>
+    </g>
+
+    <g fill="#b17642" opacity=".46">
+      <circle cx="178" cy="694" r="18"/>
+      <circle cx="1628" cy="690" r="18"/>
+      <circle cx="470" cy="716" r="14"/>
+      <circle cx="1452" cy="724" r="13"/>
+    </g>
+
+    <g fill="#57402e" opacity=".45">
+      <ellipse cx="620" cy="790" rx="15" ry="33"/>
+      <circle cx="620" cy="746" r="12"/>
+      <ellipse cx="676" cy="792" rx="13" ry="29"/>
+      <circle cx="676" cy="754" r="10"/>
+      <ellipse cx="1182" cy="796" rx="16" ry="35"/>
+      <circle cx="1182" cy="750" r="12"/>
+      <ellipse cx="1238" cy="798" rx="12" ry="28"/>
+      <circle cx="1238" cy="760" r="9"/>
+      <ellipse cx="312" cy="804" rx="13" ry="30"/>
+      <circle cx="312" cy="764" r="10"/>
+      <ellipse cx="1588" cy="806" rx="14" ry="31"/>
+      <circle cx="1588" cy="765" r="10"/>
+    </g>
+  </g>
+
+  <rect width="1920" height="1080" fill="rgba(248,239,221,.18)"/>
+</svg>

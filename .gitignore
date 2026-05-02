@@ -1,0 +1,11 @@
+*.zip
+*.log
+*.pid
+web/test-results/
+web/homepage-check*.png
+web/.web-server*.log
+web/web-server*.log
+web/.web-server.pid
+web/data/users.json
+node_modules/
+.DS_Store
