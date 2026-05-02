@@ -89,7 +89,8 @@ const ENTRY_NPC_VISIBLE_LIMIT = 48;
 const ENTRY_NPC_PRELOAD_PAD = 560;
 const NPC_BACKGROUND_PRELOAD_BATCH = 96;
 const CORE_SCENE_WARMUP_KEYS = ["comfort", "memory", "fortune", "clarity", "stall"];
-const CORE_SCENE_WARMUP_PAD = 1150;
+const CORE_SCENE_WARMUP_PAD = 1400;
+const SCENE_BACKGROUND_WARMUP_DELAY_MS = 6500;
 const FULL_LAYER_MAX_PIXELS = 90000000;
 const USE_FULL_LAYER = false;
 const MAX_DEVICE_PIXEL_RATIO = 1;
@@ -127,7 +128,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502p";
+const APP_VERSION = "heart-market-20260502q";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -1540,7 +1541,7 @@ function initialSceneChunkJobs(layers) {
   });
 }
 
-async function composeChunkJobs(jobs, onProgress) {
+async function composeChunkJobs(jobs, onProgress, options = {}) {
   const uniqueJobs = [];
   const seen = new Set();
   for (const job of jobs) {
@@ -1550,17 +1551,22 @@ async function composeChunkJobs(jobs, onProgress) {
     seen.add(key);
     uniqueJobs.push(job);
   }
+  const preloadUrls = options.preloadAll
+    ? [...new Set(uniqueJobs.flatMap((job) => chunkItemUrls(job.chunk)).filter(Boolean))]
+    : [];
+  if (preloadUrls.length) await warmImages(preloadUrls, options.onPreloadProgress);
   for (let index = 0; index < uniqueJobs.length; index += 1) {
     const job = uniqueJobs[index];
-    const urls = chunkItemUrls(job.chunk);
-    if (urls.length) await warmImages(urls);
+    const urls = options.preloadAll ? [] : chunkItemUrls(job.chunk);
+    if (!options.preloadAll && urls.length) await warmImages(urls);
     renderChunk(job.chunk, job.type);
-    releaseImages(urls);
+    if (!options.preloadAll) releaseImages(urls);
     if (job.type === "base") await gpuBaseLayer.uploadChunks([job.chunk]);
     if (job.type === "mask") await gpuMaskLayer.uploadChunks([job.chunk]);
     if (onProgress) onProgress(index + 1, uniqueJobs.length);
     if ((index + 1) % 2 === 0) await nextIdleFrame();
   }
+  if (preloadUrls.length && options.release !== false) releaseImages(preloadUrls);
 }
 
 function scheduleSceneBackgroundWarmup(layers) {
@@ -1568,14 +1574,16 @@ function scheduleSceneBackgroundWarmup(layers) {
   state.sceneWarmup.running = true;
   window.setTimeout(async () => {
     try {
+      while (state.sceneFocusWarmup.running) await sleep(250);
       const jobs = [
         ...layers.base.map((chunk) => ({ chunk, type: "base" })),
         ...layers.masks.filter((chunk) => chunk.items.length).map((chunk) => ({ chunk, type: "mask" })),
       ];
-      const batchSize = 10;
+      const batchSize = 8;
       for (let index = 0; index < jobs.length; index += batchSize) {
+        while (state.sceneFocusWarmup.running) await sleep(250);
         await composeChunkJobs(jobs.slice(index, index + batchSize));
-        await nextIdleFrame();
+        await sleep(24);
       }
       state.sceneWarmup.complete = true;
     } catch {
@@ -1583,7 +1591,7 @@ function scheduleSceneBackgroundWarmup(layers) {
     } finally {
       state.sceneWarmup.running = false;
     }
-  }, 500);
+  }, SCENE_BACKGROUND_WARMUP_DELAY_MS);
 }
 
 async function warmVisibleSceneNow() {
@@ -1611,15 +1619,22 @@ function rectAroundWorldPoint(x, y, pad = CORE_SCENE_WARMUP_PAD) {
 async function warmSceneAroundNpc(npc, options = {}) {
   if (!CLOUD_FAST_BOOT || !npc) return;
   const p = npcWorld(npc);
-  const pad = Number(options.pad || CORE_SCENE_WARMUP_PAD);
+  const viewportPad = Math.max((state.view.width || 1280) / Math.max(0.45, state.zoom) / 2, (state.view.height || 720) / Math.max(0.45, state.zoom) / 2) + 360;
+  const pad = Math.max(Number(options.pad || CORE_SCENE_WARMUP_PAD), viewportPad);
   const key = `${npc.id}:${Math.round(pad)}`;
   if (!options.force && state.sceneFocusWarmup.warmed.has(key)) return;
-  if (!state.layers?.ready) await startSceneLoad();
-  if (!state.layers?.ready) return;
-  const jobs = chunkJobsInRect(state.layers, rectAroundWorldPoint(p.x, p.y, pad));
-  if (!jobs.length) return;
-  await composeChunkJobs(jobs);
-  state.sceneFocusWarmup.warmed.add(key);
+  const ownsFocusWarmup = !state.sceneFocusWarmup.running;
+  if (ownsFocusWarmup) state.sceneFocusWarmup.running = true;
+  try {
+    if (!state.layers?.ready) await startSceneLoad();
+    if (!state.layers?.ready) return;
+    const jobs = chunkJobsInRect(state.layers, rectAroundWorldPoint(p.x, p.y, pad));
+    if (!jobs.length) return;
+    await composeChunkJobs(jobs, null, { preloadAll: true });
+    state.sceneFocusWarmup.warmed.add(key);
+  } finally {
+    if (ownsFocusWarmup) state.sceneFocusWarmup.running = false;
+  }
 }
 
 function schedulePrioritySceneWarmup(keys = CORE_SCENE_WARMUP_KEYS) {
