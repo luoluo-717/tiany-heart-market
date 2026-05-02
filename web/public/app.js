@@ -77,10 +77,17 @@ const els = {
 
 const MAP_ID = 1001;
 const TILE_SCALE = 20;
+const ENTRY_SPAWN_X = 250 * TILE_SCALE;
+const ENTRY_SPAWN_Y = 170 * TILE_SCALE;
 const CHUNK_WIDTH = 768;
 const CHUNK_HEIGHT = 768;
 const IMAGE_CONCURRENCY = 48;
 const ROLE_CONCURRENCY = 4;
+const ENTRY_NPC_FIRST_FRAMES = 2;
+const ENTRY_NPC_VISIBLE_FRAMES = 8;
+const ENTRY_NPC_VISIBLE_LIMIT = 48;
+const ENTRY_NPC_PRELOAD_PAD = 560;
+const NPC_BACKGROUND_PRELOAD_BATCH = 96;
 const FULL_LAYER_MAX_PIXELS = 90000000;
 const USE_FULL_LAYER = false;
 const MAX_DEVICE_PIXEL_RATIO = 1;
@@ -118,7 +125,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502n";
+const APP_VERSION = "heart-market-20260502o";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -562,6 +569,7 @@ const state = {
   layers: null,
   sceneLoadPromise: null,
   sceneWarmup: { running: false, complete: false, visibleRunning: false },
+  npcWarmup: { running: false, complete: false, visibleReady: false },
   role: null,
   roleSprites: null,
   roleSpriteCache: new Map(),
@@ -1296,6 +1304,49 @@ async function preloadCriticalEntryAssets(urls = []) {
   });
 }
 
+async function preloadNpcEntryFrames(render) {
+  if (!CLOUD_FAST_BOOT) return;
+  const unique = [...new Set(npcSpriteFirstFrameUrls(render).filter(Boolean))];
+  if (!unique.length) return;
+  setEntryStatus("\u6d4f\u89c8\u5668\u6b63\u5728\u9884\u8f7dNPC\u9996\u5e27\u2026", 73, `0/${unique.length}`);
+  await warmImages(unique, (done, total) => {
+    setEntryStatus("\u6d4f\u89c8\u5668\u6b63\u5728\u9884\u8f7dNPC\u9996\u5e27\u2026", progressBetween(73, 88, done, total), `${done}/${total}`);
+  });
+}
+
+async function preloadVisibleNpcEntryFrames() {
+  if (!CLOUD_FAST_BOOT || state.npcWarmup.visibleReady) return;
+  const unique = [...new Set(visibleNpcSpriteUrls().filter(Boolean))];
+  if (!unique.length) {
+    state.npcWarmup.visibleReady = true;
+    return;
+  }
+  setEntryStatus("\u6b63\u5728\u8bf7\u9996\u5c4fNPC\u5165\u573a\u2026", 100, `0/${unique.length}`);
+  await warmImages(unique, (done, total) => {
+    setEntryStatus("\u6b63\u5728\u8bf7\u9996\u5c4fNPC\u5165\u573a\u2026", 100, `${done}/${total}`);
+  });
+  state.npcWarmup.visibleReady = true;
+}
+
+function scheduleNpcBackgroundWarmup() {
+  if (!CLOUD_FAST_BOOT || state.npcWarmup.running || state.npcWarmup.complete || !state.render?.npcSprites) return;
+  state.npcWarmup.running = true;
+  window.setTimeout(async () => {
+    try {
+      const urls = [...new Set(npcSpriteUrls(state.render).filter(Boolean))];
+      for (let index = 0; index < urls.length; index += NPC_BACKGROUND_PRELOAD_BATCH) {
+        await warmImages(urls.slice(index, index + NPC_BACKGROUND_PRELOAD_BATCH));
+        await sleep(80);
+      }
+      state.npcWarmup.complete = true;
+    } catch {
+      // NPC animation warmup is opportunistic; ready-frame fallback prevents flicker.
+    } finally {
+      state.npcWarmup.running = false;
+    }
+  }, 900);
+}
+
 function imageRecord(url) {
   if (!url) return null;
   if (state.images.has(url)) return state.images.get(url);
@@ -1372,6 +1423,24 @@ function spriteUrls(sprite) {
   return (sprite?.manifest?.frames || []).map((frame) => frame.url);
 }
 
+function spriteDirectionFrames(sprite, direction = 0, limit = Infinity) {
+  const frames = sprite?.manifest?.frames || [];
+  if (!frames.length) return [];
+  const framesPerGroup = Math.max(1, Number(sprite.manifest.framesPerGroup || 1));
+  const groups = Math.max(1, Number(sprite.manifest.groups || 1));
+  const group = Math.abs(Math.round(direction || 0)) % groups;
+  const start = group * framesPerGroup;
+  const end = start + framesPerGroup;
+  const groupFrames = frames
+    .filter((frame) => Number(frame.index) >= start && Number(frame.index) < end)
+    .sort((a, b) => Number(a.index || 0) - Number(b.index || 0));
+  return (groupFrames.length ? groupFrames : [...frames].sort((a, b) => Number(a.index || 0) - Number(b.index || 0))).slice(0, limit);
+}
+
+function spriteDirectionUrls(sprite, direction = 0, limit = Infinity) {
+  return spriteDirectionFrames(sprite, direction, limit).map((frame) => frame.url).filter(Boolean);
+}
+
 function sceneStaticUrls(render) {
   const urls = [];
   for (const tile of render.scene?.tiles || []) urls.push(tile.url);
@@ -1383,6 +1452,53 @@ function npcSpriteUrls(render) {
   const urls = [];
   for (const sprite of Object.values(render.npcSprites || {})) urls.push(...spriteUrls(sprite));
   return urls;
+}
+
+function npcSpriteFirstFrameUrls(render, frameLimit = ENTRY_NPC_FIRST_FRAMES) {
+  const urls = [];
+  for (const sprite of Object.values(render?.npcSprites || {})) {
+    urls.push(...spriteDirectionUrls(sprite, Number(sprite.direction || 0), frameLimit));
+  }
+  return urls;
+}
+
+function visibleNpcSpriteUrls(frameLimit = ENTRY_NPC_VISIBLE_FRAMES) {
+  if (!state.scene?.npcs?.length || !state.render?.npcSprites) return [];
+  const rect = visibleWorldRect(ENTRY_NPC_PRELOAD_PAD);
+  const origin = state.role?.position || { x: ENTRY_SPAWN_X, y: ENTRY_SPAWN_Y };
+  const visibleNpcs = state.scene.npcs
+    .map((npc) => {
+      const p = npcWorld(npc);
+      const visible = !(p.x > rect.right || p.y > rect.bottom || p.x < rect.left || p.y < rect.top);
+      const dx = p.x - origin.x;
+      const dy = p.y - origin.y;
+      return { npc, visible, distance: dx * dx + dy * dy };
+    })
+    .filter((item) => item.visible && state.render.npcSprites[item.npc.id])
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, ENTRY_NPC_VISIBLE_LIMIT);
+  const urls = [];
+  for (const item of visibleNpcs) {
+    const sprite = state.render.npcSprites[item.npc.id];
+    urls.push(...spriteDirectionUrls(sprite, Number(item.npc.direction ?? sprite.direction ?? 0), frameLimit));
+  }
+  return urls;
+}
+
+function readySpriteFrame(sprite, direction = 0, preferredFrame = null) {
+  if (preferredFrame?.url) {
+    const record = state.images.get(preferredFrame.url);
+    if (record?.ready && !record.error) return { frame: preferredFrame, record };
+  }
+  for (const frame of spriteDirectionFrames(sprite, direction)) {
+    const record = state.images.get(frame.url);
+    if (record?.ready && !record.error) return { frame, record };
+  }
+  for (const frame of sprite?.manifest?.frames || []) {
+    const record = state.images.get(frame.url);
+    if (record?.ready && !record.error) return { frame, record };
+  }
+  return null;
 }
 
 function chunkItemUrls(chunk) {
@@ -5812,12 +5928,15 @@ function drawNpc(npc) {
   const speaking = active && state.dialog.npcId === String(npc.id) && els.dialog && !els.dialog.hidden;
   const sprite = state.render?.npcSprites?.[npc.id];
   const frame = frameForSprite(sprite, npc.direction, speaking ? 92 : 160);
-  const record = frame && imageRecord(frame.url);
+  const preferredRecord = frame && imageRecord(frame.url);
+  const readyFrame = readySpriteFrame(sprite, npc.direction, frame);
+  const drawFrame = readyFrame?.frame || frame;
+  const record = readyFrame?.record || preferredRecord;
 
   if (record?.ready && !record.error) {
     const bob = speaking ? Math.sin(state.now / 120) * 1.4 : 0;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(record.image, s.x - frame.x * state.zoom, s.y + bob - frame.y * state.zoom, frame.width * state.zoom, frame.height * state.zoom);
+    ctx.drawImage(record.image, s.x - drawFrame.x * state.zoom, s.y + bob - drawFrame.y * state.zoom, drawFrame.width * state.zoom, drawFrame.height * state.zoom);
     if (active) {
       ctx.strokeStyle = "#e7c777";
       ctx.lineWidth = 2;
@@ -5825,8 +5944,8 @@ function drawNpc(npc) {
       ctx.ellipse(s.x, s.y - 2, 18 * state.zoom, 8 * state.zoom, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
-    drawNpcGuideArrow(npc, s, frame);
-    if (!isDraggingMap()) drawLabel(displayNpcName(npc), s.x, s.y - Math.max(22, frame.y * state.zoom), active ? "#f0cd7a" : "#eaf2df");
+    drawNpcGuideArrow(npc, s, drawFrame);
+    if (!isDraggingMap()) drawLabel(displayNpcName(npc), s.x, s.y - Math.max(22, drawFrame.y * state.zoom), active ? "#f0cd7a" : "#eaf2df");
     return;
   }
 }
@@ -6121,6 +6240,7 @@ async function preloadRuntime(roleModels) {
     const preload = await waitForServerStaticPreload();
     await fetchRenderedSceneData();
     await preloadCriticalEntryAssets(preload.criticalUrls || []);
+    await preloadNpcEntryFrames(state.render);
     state.runtimeReady = true;
     const ready = await fetchJson("/generated/runtime-ready.json").catch(() => null);
     const roleCount = ready?.roles?.length || roleModels.length;
@@ -6163,6 +6283,17 @@ async function enterGame(payload) {
   setupMarketWorld();
   state.roleSprites = state.roleSpriteCache.get(state.role.model) || null;
   state.selectedNpc = null;
+
+  if (CLOUD_FAST_BOOT) {
+    markResizeDirty();
+    ensureCanvasSize();
+    resetMotionState(true);
+    await Promise.all([
+      preloadVisibleNpcEntryFrames(),
+      state.roleSprites ? Promise.resolve(state.roleSprites) : loadRoleSprite(state.role.model).catch((error) => setStatus(error.message)),
+    ]);
+  }
+
   els.entry.hidden = true;
   els.game.hidden = false;
   markResizeDirty();
@@ -6180,7 +6311,7 @@ async function enterGame(payload) {
     showNewbieGuide("entry", true);
     window.setTimeout(tryAutoplayMusic, 120);
     setStatus(TEXT.enteredCity(state.role.name));
-    loadRoleSprite(state.role.model).catch((error) => setStatus(error.message));
+    scheduleNpcBackgroundWarmup();
     window.setTimeout(() => startSceneLoad().catch((error) => setStatus(error.message)), 1800);
     return;
   }
