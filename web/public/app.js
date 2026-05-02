@@ -118,7 +118,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502k";
+const APP_VERSION = "heart-market-20260502l";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -4814,6 +4814,32 @@ function drawChunkLayer(chunks) {
   }
 }
 
+function drawRawSceneItems(items, fillBase = false) {
+  if (!items?.length) return false;
+  const camera = currentCamera();
+  const rect = visibleWorldRect(isDraggingMap() ? DRAG_DRAW_PAD : STATIC_DRAW_PAD);
+  let drawn = 0;
+
+  if (fillBase) {
+    ctx.fillStyle = "#101411";
+    ctx.fillRect(0, 0, state.view.width, state.view.height);
+  }
+
+  for (const item of items) {
+    if (item.x > rect.right || item.y > rect.bottom || item.x + item.width < rect.left || item.y + item.height < rect.top) continue;
+    const record = imageRecord(item.url);
+    if (!record?.ready || record.error) continue;
+    const x0 = Math.round((item.x - camera.x) * state.zoom);
+    const y0 = Math.round((item.y - camera.y) * state.zoom);
+    const x1 = Math.round((item.x + item.width - camera.x) * state.zoom);
+    const y1 = Math.round((item.y + item.height - camera.y) * state.zoom);
+    ctx.drawImage(record.image, x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
+    drawn += 1;
+  }
+
+  return drawn > 0;
+}
+
 function renderChunksToCache(cacheCtx, chunks, cache, type) {
   const layers = state.layers;
   if (!layers) return;
@@ -4951,6 +4977,10 @@ function drawPanCacheLayer(type) {
 
 function drawSceneBase() {
   if (CLOUD_FAST_BOOT && state.layers?.ready) warmVisibleSceneNow();
+  if (CLOUD_FAST_BOOT && state.render?.scene?.tiles?.length) {
+    drawRawSceneItems(state.render.scene.tiles, true);
+    return;
+  }
   if (state.layers?.useFull && state.layers.fullBase) {
     ctx.imageSmoothingEnabled = false;
     drawFullLayer(state.layers.fullBase);
@@ -4966,6 +4996,10 @@ function drawSceneBase() {
 }
 
 function drawMasks() {
+  if (CLOUD_FAST_BOOT && state.render?.scene?.masks?.length) {
+    drawRawSceneItems(state.render.scene.masks, false);
+    return;
+  }
   if (state.layers?.useFull && state.layers.fullMasks) {
     ctx.imageSmoothingEnabled = false;
     drawFullLayer(state.layers.fullMasks);
@@ -5905,7 +5939,7 @@ function draw(now = performance.now()) {
   if (steps === MAX_SIMULATION_STEPS) state.accumulator = 0;
   updateRenderPose(Math.min(frameDelta, MAX_RENDER_DELTA));
   updateCamera(Math.min(frameDelta, CAMERA_MAX_DELTA));
-  const hasGpuMap = drawGpuSceneLayers();
+  const hasGpuMap = CLOUD_FAST_BOOT ? false : drawGpuSceneLayers();
 
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, state.view.width, state.view.height);
