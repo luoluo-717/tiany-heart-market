@@ -118,7 +118,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502i";
+const APP_VERSION = "heart-market-20260502j";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -560,7 +560,7 @@ const state = {
   render: null,
   layers: null,
   sceneLoadPromise: null,
-  sceneWarmup: { running: false, complete: false },
+  sceneWarmup: { running: false, complete: false, visibleRunning: false },
   role: null,
   roleSprites: null,
   roleSpriteCache: new Map(),
@@ -1421,7 +1421,11 @@ function scheduleSceneBackgroundWarmup(layers) {
         ...layers.base.map((chunk) => ({ chunk, type: "base" })),
         ...layers.masks.filter((chunk) => chunk.items.length).map((chunk) => ({ chunk, type: "mask" })),
       ];
-      await composeChunkJobs(jobs);
+      const batchSize = 10;
+      for (let index = 0; index < jobs.length; index += batchSize) {
+        await composeChunkJobs(jobs.slice(index, index + batchSize));
+        await nextIdleFrame();
+      }
       state.sceneWarmup.complete = true;
     } catch {
       // Background warmup is optional; visible chunks continue to load on demand.
@@ -1429,6 +1433,19 @@ function scheduleSceneBackgroundWarmup(layers) {
       state.sceneWarmup.running = false;
     }
   }, 500);
+}
+
+async function warmVisibleSceneNow() {
+  if (!CLOUD_FAST_BOOT || !state.layers?.ready || state.sceneWarmup.visibleRunning) return;
+  state.sceneWarmup.visibleRunning = true;
+  try {
+    const jobs = chunkJobsInRect(state.layers, visibleWorldRect(STATIC_DRAW_PAD));
+    await composeChunkJobs(jobs);
+  } catch {
+    // Visible warmup is best-effort; the canvas fallback will keep retrying.
+  } finally {
+    state.sceneWarmup.visibleRunning = false;
+  }
 }
 
 function markResizeDirty() {
@@ -4932,6 +4949,7 @@ function drawPanCacheLayer(type) {
 }
 
 function drawSceneBase() {
+  if (CLOUD_FAST_BOOT && state.layers?.ready) warmVisibleSceneNow();
   if (state.layers?.useFull && state.layers.fullBase) {
     ctx.imageSmoothingEnabled = false;
     drawFullLayer(state.layers.fullBase);
@@ -4977,6 +4995,7 @@ function drawGpuSceneLayers() {
   if (!baseDrawn || !masksDrawn) {
     sceneCanvas.hidden = true;
     maskCanvas.hidden = true;
+    if (CLOUD_FAST_BOOT) warmVisibleSceneNow();
     return false;
   }
   sceneCanvas.hidden = false;
@@ -5942,6 +5961,7 @@ async function loadRenderedScene() {
       applyRenderBounds();
       centerCamera();
     }
+    window.setTimeout(warmVisibleSceneNow, 0);
     return data;
   }
 
