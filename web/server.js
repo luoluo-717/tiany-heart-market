@@ -1454,7 +1454,7 @@ function criticalSceneUrls() {
     bottom: spawn.y + 560,
   };
   const visible = (item) => !(item.x > rect.right || item.y > rect.bottom || item.x + item.width < rect.left || item.y + item.height < rect.top);
-  return [...tiles.filter(visible), ...masks.filter(visible)].map((item) => item.url).filter(Boolean);
+  return tiles.filter(visible).map((item) => item.url).filter(Boolean);
 }
 
 async function preloadStaticResources() {

@@ -118,7 +118,7 @@ const WORLD_FX_LIMIT = 72;
 const TOAST_LIMIT = 4;
 const MUSIC_SCALE = [196, 220, 247, 294, 330, 392, 440];
 const MUSIC_NOTE_MS = 820;
-const APP_VERSION = "heart-market-20260502m";
+const APP_VERSION = "heart-market-20260502n";
 const FAST_BOOT_HOSTS = new Set(["luoluo.twofishai.com", "tiany-heart-market.onrender.com"]);
 const CLOUD_FAST_BOOT = FAST_BOOT_HOSTS.has(window.location.hostname);
 const BGM_URL = `/assets/audio/wuxia2-guzheng-pipa.mp3?v=${APP_VERSION}`;
@@ -6000,11 +6000,7 @@ async function loadRenderedScene() {
     return state.render;
   }
 
-  setStatus(TEXT.loadingCity);
-  const data = await fetchJson(`/api/render/scene/${MAP_ID}`);
-  hydrateCollisionGrid(data);
-  state.render = data;
-  initPathWorker();
+  const data = await fetchRenderedSceneData();
   const staticUrls = sceneStaticUrls(data);
   const spriteUrlsToLoad = npcSpriteUrls(data);
 
@@ -6052,6 +6048,20 @@ async function loadRenderedScene() {
     applyRenderBounds();
     centerCamera();
   }
+  return data;
+}
+
+async function fetchRenderedSceneData() {
+  if (state.render?.scene?.tiles?.length) {
+    hydrateCollisionGrid(state.render);
+    return state.render;
+  }
+  setStatus(TEXT.loadingCity);
+  const data = await fetchJson(`/api/render/scene/${MAP_ID}`);
+  hydrateCollisionGrid(data);
+  state.render = data;
+  initPathWorker();
+  if (state.scene && data.scene?.width && data.scene?.height) applyRenderBounds();
   return data;
 }
 
@@ -6109,9 +6119,8 @@ async function preloadRuntime(roleModels) {
 
   if (CLOUD_FAST_BOOT) {
     const preload = await waitForServerStaticPreload();
+    await fetchRenderedSceneData();
     await preloadCriticalEntryAssets(preload.criticalUrls || []);
-    setEntryStatus("正在铺开长安市集首屏…", 74, "");
-    await startSceneLoad();
     state.runtimeReady = true;
     const ready = await fetchJson("/generated/runtime-ready.json").catch(() => null);
     const roleCount = ready?.roles?.length || roleModels.length;
@@ -6166,22 +6175,13 @@ async function enterGame(payload) {
   setStatus(TEXT.enteringCity);
 
   if (CLOUD_FAST_BOOT) {
-    const scenePromise = startSceneLoad();
     renderMarketHud();
     renderWelcomeMarketPanel();
     showNewbieGuide("entry", true);
     window.setTimeout(tryAutoplayMusic, 120);
-    setStatus(TEXT.loadingVisibleScene);
-    Promise.all([scenePromise, loadRoleSprite(state.role.model)])
-      .then(() => {
-        applyRenderBounds();
-        filterUnavailableNpcs();
-        setupMarketWorld();
-        resetMotionState(true);
-        renderMarketHud();
-        setStatus(TEXT.enteredCity(state.role.name));
-      })
-      .catch((error) => setStatus(error.message));
+    setStatus(TEXT.enteredCity(state.role.name));
+    loadRoleSprite(state.role.model).catch((error) => setStatus(error.message));
+    window.setTimeout(() => startSceneLoad().catch((error) => setStatus(error.message)), 1800);
     return;
   }
 
